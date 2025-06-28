@@ -1,4 +1,4 @@
-/* INCLUDES */
+/* IMPORTS */
 #include <unistd.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -8,27 +8,45 @@
 
 #include "core.c"
 
-/* MAIN LOGIC */
-int main()
+/* DATA */
+struct editorConfig E;
+
+/* INIT */
+void init() {
+    E.cx = 0;
+    E.rx = 0;
+    E.cy = 0;
+    E.numrows = 0;
+    E.rowoff = 0;
+    E.coloff = 0;
+    E.row = NULL;
+    E.filename = NULL;
+    E.status[0] = '\0';
+    E.statustime = 0;
+
+    if (getWindowSize(&E.screenrows, &E.screencols) == -1)
+        die("getWindowSize");
+    E.screenrows -= 2;
+
+    resetScreen();
+}
+
+/* MAIN LOOP */
+int main(int argc, char *argv[])
 {
     enableRawMode();
+    init();
+   
+    if (argc >= 2) {
+        eopen(argv[1]);
+    }
+
+    setStatusMessage("Ctrl-X: Quit");
 
     while (1)
     {
-        char c = '\0';
-        if (read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read");
-        
-        if (iscntrl(c))
-        {
-            printf("%d\r\n", c);
-        }
-        else
-        {
-            printf("%d ('%c')\r\n", c, c);
-        }
-
-        if (c == 3)
-            break; // Ctrl-C to exit
+        refreshScreen();
+        processKeypress();
     }
 
     return 0;
