@@ -485,6 +485,7 @@ void drawRows(struct abuf *ab)
             memcpy(tp, &E.row[filerow].render[E.coloff], len - maxlen);
 
             abAppend(ab, text, len);
+            free(text);
         }
 
         abAppend(ab, "\x1b[K", 3);
