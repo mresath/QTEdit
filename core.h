@@ -1,8 +1,10 @@
 /* IMPORTS */
+
 #include <termios.h>
 #include <time.h>
 
 /* MACROS */
+
 #define VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f) // Macro to get the value of ctrl + some key
 #define ABUF_INIT {NULL, 0}      // Empty append buffer
@@ -22,6 +24,7 @@ enum keycodes // Codes for break characters
 };
 
 /* STRUCTS */
+
 typedef struct erow
 {
     char *chars;  // Actual content of a row

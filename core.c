@@ -1,4 +1,5 @@
 /* IMPORTS */
+
 #include <termios.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -9,13 +10,16 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <time.h>
+#include <math.h>
 
 #include "core.h"
 
 /* DATA */
+
 extern struct editorConfig E;
 
 /* GENERAL */
+
 void resetScreen(void)
 {
     write(STDOUT_FILENO, "\x1b[2J", 4);
@@ -30,6 +34,7 @@ void die(char *s)
 }
 
 /* ROW OPS */
+
 void renderRow(erow *row)
 {
     // Changes row rendering for certain characters
@@ -93,6 +98,7 @@ int getCursorRx(erow *row, int cx)
 }
 
 /* I/O */
+
 void eopen(char *filename)
 {
     free(E.filename);
@@ -106,7 +112,7 @@ void eopen(char *filename)
     size_t linecap = 0;
     ssize_t linelen;
     while ((linelen = getline(&line, &linecap, fp)) != -1)
-    {
+    { // Read file line by line and append to memory
         while (linelen > 0 && (line[linelen - 1] == '\n' ||
                                line[linelen - 1] == '\r'))
             linelen--;
@@ -115,9 +121,12 @@ void eopen(char *filename)
 
     free(line);
     fclose(fp);
+
+    E.cx = log10(E.numrows) + 2; // Set cursor to the start of the first line
 }
 
 /* APPEND BUFFER */
+
 void abAppend(struct abuf *ab, const char *s, int len)
 {
     // Append a string to the append buffer
@@ -139,6 +148,7 @@ void abFree(struct abuf *ab)
 /* TERMINAL */
 
 /** CONFIG **/
+
 void disableRawMode(void)
 {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)
@@ -164,6 +174,7 @@ void enableRawMode(void)
 }
 
 /** INPUT **/
+
 int readKey(void)
 {
     int nread;
@@ -293,32 +304,35 @@ int getWindowSize(int *rows, int *cols)
 }
 
 /** LOGIC **/
+
 void moveCursor(int key)
 {
+    int offset = log10(E.numrows) + 2; // Offset for line numbers
+
     erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
 
     switch (key)
     {
     case ARROW_LEFT: // Move left
-        if (E.cx > 0)
+        if (E.cx > offset)
         {
             E.cx--;
         }
         else if (E.cy > 0)
         {
             E.cy--;
-            E.cx = E.row[E.cy].size;
+            E.cx = E.row[E.cy].size + offset;
         }
         break;
     case ARROW_RIGHT: // Move right
-        if (row && E.cx < row->size)
+        if (row && E.cx < row->size + offset)
         {
             E.cx++;
         }
-        else if (row && E.cx == row->size)
+        else if (row && E.cx == row->size + offset)
         {
             E.cy++;
-            E.cx = 0;
+            E.cx = offset;
         }
         break;
     case ARROW_DOWN: // Move down
@@ -333,8 +347,11 @@ void moveCursor(int key)
 
     row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
     int rowlen = row ? row->size : 0;
+    rowlen += offset;
     if (E.cx > rowlen)
         E.cx = rowlen;
+    if (E.cx < offset)
+        E.cx = offset;
 }
 
 void processKeypress(void)
@@ -388,6 +405,7 @@ void processKeypress(void)
 }
 
 /** OUTPUT **/
+
 void scroll(void)
 {
     // Calculates scroll based on cursor position and text content
@@ -444,12 +462,29 @@ void drawRows(struct abuf *ab)
         }
         else
         {
-            int len = E.row[filerow].rsize - E.coloff;
+            int maxlen = log10(E.numrows) + 2;
+
+            char starttext[8];
+            sprintf(starttext, "%d ", filerow + 1);
+
+            int len = E.row[filerow].rsize - E.coloff + maxlen;
             if (len < 0)
                 len = 0;
             if (len > E.screencols)
                 len = E.screencols;
-            abAppend(ab, &E.row[filerow].render[E.coloff], len);
+
+            char *text = malloc(len + 1);
+            char *tp = text;
+            for (int i = 0; i < maxlen; i++)
+            {
+                if (i < (int)strlen(starttext))
+                    *tp++ = starttext[i];
+                else
+                    *tp++ = ' ';
+            }
+            memcpy(tp, &E.row[filerow].render[E.coloff], len - maxlen);
+
+            abAppend(ab, text, len);
         }
 
         abAppend(ab, "\x1b[K", 3);
@@ -505,8 +540,8 @@ void refreshScreen(void)
     abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
     abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
 
-    drawRows(&ab); // Draw the rows
-    drawBar(&ab);  // Draw the info bar
+    drawRows(&ab);   // Draw the rows
+    drawBar(&ab);    // Draw the info bar
     drawStatus(&ab); // Draw status message
 
     char buf[32];

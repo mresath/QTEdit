@@ -1,4 +1,5 @@
 /* IMPORTS */
+
 #include <unistd.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -9,9 +10,11 @@
 #include "core.c"
 
 /* DATA */
+
 struct editorConfig E;
 
 /* INIT */
+
 void init(void) {
     E.cx = 0;
     E.rx = 0;
@@ -32,6 +35,7 @@ void init(void) {
 }
 
 /* MAIN LOOP */
+
 int main(int argc, char *argv[])
 {
     enableRawMode();
