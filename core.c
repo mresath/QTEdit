@@ -16,7 +16,7 @@
 extern struct editorConfig E;
 
 /* GENERAL */
-void resetScreen()
+void resetScreen(void)
 {
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H", 3);
@@ -139,13 +139,13 @@ void abFree(struct abuf *ab)
 /* TERMINAL */
 
 /** CONFIG **/
-void disableRawMode()
+void disableRawMode(void)
 {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)
         die("tcsetattr");
 }
 
-void enableRawMode()
+void enableRawMode(void)
 {
     if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1)
         die("tcgetattr");
@@ -164,7 +164,7 @@ void enableRawMode()
 }
 
 /** INPUT **/
-int readKey()
+int readKey(void)
 {
     int nread;
     char c;
@@ -337,7 +337,7 @@ void moveCursor(int key)
         E.cx = rowlen;
 }
 
-void processKeypress()
+void processKeypress(void)
 {
     int c = readKey();
 
@@ -388,7 +388,7 @@ void processKeypress()
 }
 
 /** OUTPUT **/
-void scroll()
+void scroll(void)
 {
     // Calculates scroll based on cursor position and text content
     E.rx = E.cy < E.numrows ? getCursorRx(&E.row[E.cy], E.cx) : 0;
@@ -496,7 +496,7 @@ void drawStatus(struct abuf *ab)
         abAppend(ab, E.status, len);
 }
 
-void refreshScreen()
+void refreshScreen(void)
 {
     scroll();
 

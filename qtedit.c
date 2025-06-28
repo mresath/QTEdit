@@ -12,7 +12,7 @@
 struct editorConfig E;
 
 /* INIT */
-void init() {
+void init(void) {
     E.cx = 0;
     E.rx = 0;
     E.cy = 0;
