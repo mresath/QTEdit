@@ -15,7 +15,8 @@ struct editorConfig E;
 
 /* INIT */
 
-void init(void) {
+void init(void)
+{
     E.cx = 0;
     E.rx = 0;
     E.cy = 0;
@@ -27,6 +28,7 @@ void init(void) {
     E.filename = NULL;
     E.status[0] = '\0';
     E.statustime = 0;
+    E.syntax = NULL;
 
     if (getWindowSize(&E.screenrows, &E.screencols) == -1)
         die("getWindowSize");
@@ -41,8 +43,9 @@ int main(int argc, char *argv[])
 {
     enableRawMode();
     init();
-   
-    if (argc >= 2) {
+
+    if (argc >= 2)
+    {
         eopen(argv[1]);
     }
 
