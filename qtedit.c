@@ -23,6 +23,7 @@ void init(void) {
     E.rowoff = 0;
     E.coloff = 0;
     E.row = NULL;
+    E.dirty = 0;
     E.filename = NULL;
     E.status[0] = '\0';
     E.statustime = 0;
@@ -45,7 +46,7 @@ int main(int argc, char *argv[])
         eopen(argv[1]);
     }
 
-    setStatusMessage("Ctrl-X: Quit");
+    setStatusMessage(GUIDE);
 
     while (1)
     {

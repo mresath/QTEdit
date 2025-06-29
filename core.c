@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
+#include <fcntl.h>
 
 #include "core.h"
 
@@ -18,20 +19,17 @@
 
 extern struct editorConfig E;
 
-/* GENERAL */
+/* PROTOTYPES */
 
-void resetScreen(void)
-{
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-    write(STDOUT_FILENO, "\x1b[H", 3);
-}
+void setStatusMessage(const char *fmt, ...);
 
-void die(char *s)
-{
-    resetScreen();
-    perror(s);
-    exit(1);
-}
+void die(char *s);
+
+void resetScreen(void);
+
+void refreshScreen(void);
+
+char *askPrompt(char *prompt);
 
 /* ROW OPS */
 
@@ -65,12 +63,14 @@ void renderRow(erow *row)
     row->rsize = i;
 }
 
-void appendRow(char *s, size_t len)
+void insertRow(int at, char *s, size_t len)
 {
-    // Append row to current text in memory
+    // Insert row to current text in memory
+    if (at < 0 || at > E.numrows)
+        return;
     E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+    memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
 
-    int at = E.numrows;
     E.row[at].size = len;
     E.row[at].chars = malloc(len + 1);
     memcpy(E.row[at].chars, s, len);
@@ -81,6 +81,7 @@ void appendRow(char *s, size_t len)
     renderRow(&E.row[at]);
 
     E.numrows++;
+    E.dirty++;
 }
 
 int getCursorRx(erow *row, int cx)
@@ -97,10 +98,145 @@ int getCursorRx(erow *row, int cx)
     return rx;
 }
 
+void rowInsertChar(erow *row, int at, char c)
+{
+    // Insert a character into a row at a specific position
+    if (at < 0 || at > row->size)
+        at = row->size;
+    row->chars = realloc(row->chars, row->size + 2);
+    memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+    row->size++;
+    row->chars[at] = c;
+    renderRow(row);
+    E.dirty++;
+}
+
+void rowDeleteChar(erow *row, int at)
+{
+    // Delete a character from a row at a specific position
+    if (at < 0 || at >= row->size)
+        return;
+    memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+    row->size--;
+    renderRow(row);
+    E.dirty++;
+}
+
+void freeRow(erow *row)
+{
+    // Free the memory allocated for a row
+    free(row->render);
+    free(row->chars);
+}
+
+void deleteRow(int at)
+{
+    // Delete a row from the text in memory
+    if (at < 0 || at >= E.numrows)
+        return;
+    freeRow(&E.row[at]);
+    memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));
+    E.numrows--;
+    E.dirty++;
+}
+
+void rowAppendString(erow *row, char *s, size_t len)
+{
+    // Append a string to the end of a row
+    row->chars = realloc(row->chars, row->size + len + 1);
+    memcpy(&row->chars[row->size], s, len);
+    row->size += len;
+    row->chars[row->size] = '\0';
+    renderRow(row);
+    E.dirty++;
+}
+
+/* OPS */
+
+void insertChar(int c)
+{
+    // Insert char at cursor
+    if (E.cy == E.numrows)
+    {
+        if (E.numrows == 0) {
+            E.cx = 2;
+        }
+        insertRow(E.numrows, "", 0);
+    }
+    rowInsertChar(&E.row[E.cy], E.cx, c);
+    E.cx++;
+}
+
+void insertNewline(void)
+{
+    // Enter press basically
+    int offset = log10(E.numrows) + 2; // Offset for line numbers
+
+    if (E.cx == offset)
+    {
+        insertRow(E.cy, "", 0);
+    }
+    else
+    {
+        erow *row = &E.row[E.cy];
+        insertRow(E.cy + 1, &row->chars[E.cx - offset], row->size - E.cx + offset);
+        row = &E.row[E.cy];
+        row->size = E.cx - offset;
+        row->chars[row->size] = '\0';
+        renderRow(row);
+    }
+    E.cy++;
+    E.cx = offset;
+}
+
+void deleteChar(void)
+{
+    // Delete char at cursor
+    int offset = log10(E.numrows) + 2; // Offset for line numbers
+    if (E.cy == E.numrows)
+        return;
+    if (E.cx == offset && E.cy == 0)
+        return;
+    erow *row = &E.row[E.cy];
+    if (E.cx > offset)
+    {
+        rowDeleteChar(row, E.cx - 1 - offset);
+        E.cx--;
+    }
+    else
+    {
+        E.cx = E.row[E.cy - 1].size + offset; // Move to end of previous line
+        rowAppendString(&E.row[E.cy - 1], row->chars, row->size);
+        deleteRow(E.cy);
+        E.cy--;
+    }
+}
+
 /* I/O */
+
+void *rowsToString(int *buflen)
+{
+    // Convert all rows to a single string for saving
+    int totlen = 0;
+    int j;
+    for (j = 0; j < E.numrows; j++)
+        totlen += E.row[j].size + 1;
+    *buflen = totlen;
+    char *buf = malloc(totlen);
+    char *p = buf;
+    for (j = 0; j < E.numrows; j++)
+    {
+        memcpy(p, E.row[j].chars, E.row[j].size);
+        p += E.row[j].size;
+        *p = '\n';
+        p++;
+    }
+    return buf;
+}
 
 void eopen(char *filename)
 {
+    // Open a file and read its contents into memory
     free(E.filename);
     E.filename = strdup(filename);
 
@@ -116,13 +252,52 @@ void eopen(char *filename)
         while (linelen > 0 && (line[linelen - 1] == '\n' ||
                                line[linelen - 1] == '\r'))
             linelen--;
-        appendRow(line, linelen);
+        insertRow(E.numrows, line, linelen);
     }
 
     free(line);
     fclose(fp);
 
     E.cx = log10(E.numrows) + 2; // Set cursor to the start of the first line
+    E.dirty = 0;                 // Reset dirty flag
+}
+
+void esave(void)
+{
+    // Save the current text in memory to a file
+    if (E.filename == NULL)
+    {
+        E.filename = askPrompt("Save as: %s (ESC to cancel)");
+        if (E.filename == NULL)
+        {
+            setStatusMessage("Save aborted");
+            return;
+        }
+    }
+
+    int len;
+    char *buf = rowsToString(&len);
+
+    int fd = open("qtedit_temp", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd != -1)
+    {
+        ssize_t res = write(fd, buf, len);
+        if (res == len)
+        {
+            if (rename("qtedit_temp", E.filename) != -1)
+            {
+                close(fd);
+                free(buf);
+                setStatusMessage("Saved to %s", E.filename);
+                E.dirty = 0; // Reset dirty flag
+                return;
+            }
+        }
+        close(fd);
+    }
+
+    free(buf);
+    setStatusMessage("Error saving to %s: %s", E.filename, strerror(errno));
 }
 
 /* APPEND BUFFER */
@@ -148,6 +323,19 @@ void abFree(struct abuf *ab)
 /* TERMINAL */
 
 /** CONFIG **/
+
+void die(char *s)
+{
+    resetScreen();
+    perror(s);
+    exit(1);
+}
+
+void resetScreen(void)
+{
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[H", 3);
+}
 
 void disableRawMode(void)
 {
@@ -303,6 +491,52 @@ int getWindowSize(int *rows, int *cols)
     return 0;
 }
 
+char *askPrompt(char *prompt)
+{
+    size_t bufsize = 128;
+    char *buf = malloc(bufsize);
+
+    size_t buflen = 0;
+    buf[0] = '\0';
+
+    while (1)
+    {
+        setStatusMessage(prompt, buf);
+        refreshScreen();
+
+        int c = readKey();
+        if (c == DELETE_KEY || c == CTRL_KEY('h') || c == BACKSPACE)
+        {
+            if (buflen != 0)
+                buf[--buflen] = '\0';
+        }
+        else if (c == '\x1b')
+        {
+            setStatusMessage("");
+            free(buf);
+            return NULL;
+        }
+        else if (c == '\r')
+        { // Enter key
+            if (buflen > 0)
+            {
+                setStatusMessage("");
+                return buf;
+            }
+        }
+        else if (!iscntrl(c) && c < 128)
+        {
+            if (buflen == bufsize - 1)
+            {
+                bufsize *= 2;
+                buf = realloc(buf, bufsize);
+            }
+            buf[buflen++] = c;
+            buf[buflen] = '\0';
+        }
+    }
+}
+
 /** LOGIC **/
 
 void moveCursor(int key)
@@ -356,13 +590,28 @@ void moveCursor(int key)
 
 void processKeypress(void)
 {
+    static int quit_count = QUIT_PROT; // Counter for quitting when dirty
+
     int c = readKey();
 
     switch (c)
     {
+    case '\r':
+        insertNewline();
+        break;
+
     case CTRL_KEY('x'): // Exit on Ctrl-X
+        if (E.dirty && --quit_count > 0)
+        {
+            setStatusMessage(QUIT_TEXT, quit_count, quit_count == 1 ? "" : "s");
+            return;
+        }
         resetScreen();
         exit(0);
+        break;
+
+    case CTRL_KEY('s'): // Save on Ctrl-S
+        esave();
         break;
 
     case HOME_KEY: // Return to start of line on HOME
@@ -373,6 +622,14 @@ void processKeypress(void)
         {
             E.cx = E.row[E.cy].size;
         }
+        break;
+
+    case BACKSPACE:
+    case DELETE_KEY:
+    case CTRL_KEY('h'):
+        if (c == DELETE_KEY)
+            moveCursor(ARROW_RIGHT); // Move right if DELETE is pressed
+        deleteChar();
         break;
 
     case PAGE_UP: // Go to top/bottom of file on PAGE_UP/PAGE_DOWN
@@ -401,7 +658,17 @@ void processKeypress(void)
     case ARROW_UP:    // Move up
         moveCursor(c);
         break;
+
+    case CTRL_KEY('l'):
+    case '\x1b':
+        break;
+
+    default:
+        insertChar(c); // Insert character
+        break;
     }
+
+    quit_count = QUIT_PROT; // Reset quit count after any keypress
 }
 
 /** OUTPUT **/
@@ -465,7 +732,7 @@ void drawRows(struct abuf *ab)
             int maxlen = log10(E.numrows) + 2;
 
             char starttext[8];
-            sprintf(starttext, "%d ", filerow + 1);
+            int nlen = sprintf(starttext, "%d ", filerow + 1);
 
             int len = E.row[filerow].rsize - E.coloff + maxlen;
             if (len < 0)
@@ -477,7 +744,7 @@ void drawRows(struct abuf *ab)
             char *tp = text;
             for (int i = 0; i < maxlen; i++)
             {
-                if (i < (int)strlen(starttext))
+                if (i < nlen)
                     *tp++ = starttext[i];
                 else
                     *tp++ = ' ';
@@ -498,8 +765,9 @@ void drawBar(struct abuf *ab)
     // Appends a info bar to the buffer
     abAppend(ab, "\x1b[7m", 4);
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines",
-                       E.filename ? E.filename : "[No Name]", E.numrows);
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
+                       E.filename ? E.filename : "[No Name]", E.numrows,
+                       E.dirty ? "(modified)" : "");
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
                         E.cy + 1, E.numrows);
     if (len > E.screencols)
