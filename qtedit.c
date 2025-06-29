@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
         eopen(argv[1]);
     }
 
-    setStatusMessage(GUIDE);
+    setStatusMessage(GUIDE_TEXT);
 
     while (1)
     {

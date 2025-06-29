@@ -9,9 +9,10 @@
 #define CTRL_KEY(k) ((k) & 0x1f) // Macro to get the value of ctrl + some key
 #define ABUF_INIT {NULL, 0}      // Empty append buffer
 #define TAB_STOP 4               // How many chars each tab is
-#define GUIDE "Ctrl-S: Save | Ctrl-X: Quit | Ctrl-F: Find | Ctrl-G: Goto Line | Ctrl-H: Help" // Status message for help
+#define GUIDE_TEXT "Ctrl-S: Save | Ctrl-X: Quit | Ctrl-F: Find | Ctrl-G: Goto Line | Ctrl-H: Help" // Status message for help
 #define QUIT_PROT 3 // Number of times to press Ctrl-X to quit when dirty
 #define QUIT_TEXT "WARNING: File has unsaved changes. Press Ctrl-X %d more time%s to quit."
+#define FIND_TEXT "Search: %s (Use ESC/Arrows/Enter)"
 
 enum keycodes // Codes for break characters
 {

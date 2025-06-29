@@ -29,7 +29,7 @@ void resetScreen(void);
 
 void refreshScreen(void);
 
-char *askPrompt(char *prompt);
+char *askPrompt(char *prompt, void (*callback)(char *, int));
 
 /* ROW OPS */
 
@@ -98,6 +98,22 @@ int getCursorRx(erow *row, int cx)
     return rx;
 }
 
+int getCursorCx(erow *row, int rx)
+{
+    // Inverse of getCursorRx, calculates the character index from the rendered position
+    int cur_rx = 0;
+    int cx;
+    for (cx = 0; cx < row->size; cx++)
+    {
+        if (row->chars[cx] == '\t')
+            cur_rx += (TAB_STOP - 1) - (cur_rx % TAB_STOP);
+        cur_rx++;
+        if (cur_rx > rx)
+            return cx;
+    }
+    return cx;
+}
+
 void rowInsertChar(erow *row, int at, char c)
 {
     // Insert a character into a row at a specific position
@@ -156,14 +172,17 @@ void rowAppendString(erow *row, char *s, size_t len)
 void insertChar(int c)
 {
     // Insert char at cursor
+    int offset = log10(E.numrows) + 2; // Offset for line numbers
+
     if (E.cy == E.numrows)
     {
-        if (E.numrows == 0) {
+        if (E.numrows == 0)
+        {
             E.cx = 2;
         }
         insertRow(E.numrows, "", 0);
     }
-    rowInsertChar(&E.row[E.cy], E.cx, c);
+    rowInsertChar(&E.row[E.cy], E.cx - offset, c);
     E.cx++;
 }
 
@@ -267,7 +286,7 @@ void esave(void)
     // Save the current text in memory to a file
     if (E.filename == NULL)
     {
-        E.filename = askPrompt("Save as: %s (ESC to cancel)");
+        E.filename = askPrompt("Save as: %s (ESC to cancel)", NULL);
         if (E.filename == NULL)
         {
             setStatusMessage("Save aborted");
@@ -298,6 +317,81 @@ void esave(void)
 
     free(buf);
     setStatusMessage("Error saving to %s: %s", E.filename, strerror(errno));
+}
+
+/* SEARCH */
+
+void search(char *query, int key)
+{
+    static int lm = -1;
+    static int dir = 1;
+
+    if (key == 'r' || key == '\x1b')
+    {
+        lm = -1;
+        dir = 1;
+        return;
+    }
+    else if (key == ARROW_RIGHT || key == ARROW_DOWN)
+    {
+        dir = 1;
+    }
+    else if (key == ARROW_LEFT || key == ARROW_UP)
+    {
+        dir = -1;
+    }
+    else
+    {
+        lm = -1;
+        dir = 1;
+    }
+
+    if (lm == -1)
+        dir = 1;
+    int cur = lm;
+    int i;
+    for (i = 0; i < E.numrows; i++)
+    {
+        cur += dir;
+        if (cur == -1)
+            cur = E.numrows - 1;
+        else if (cur == E.numrows)
+            cur = 0;
+
+        erow *row = &E.row[cur];
+        char *match = strstr(row->render, query);
+        if (match)
+        {
+            lm = cur;
+            E.cy = cur;
+            E.cx = getCursorCx(row, match - row->render + strlen(query)) + log10(E.numrows) + 2;
+            E.rowoff = E.numrows;
+            break;
+        }
+    }
+}
+
+void find(void)
+{
+    int scy = E.cy; // Save current cursor position
+    int scx = E.cx;
+    int sco = E.coloff;
+    int sro = E.rowoff;
+
+    char *query = askPrompt(FIND_TEXT, search);
+
+    if (query)
+    {
+        free(query);
+    }
+    else
+    {
+        // If search was cancelled, restore cursor position
+        E.cy = scy;
+        E.cx = scx;
+        E.coloff = sco;
+        E.rowoff = sro;
+    }
 }
 
 /* APPEND BUFFER */
@@ -491,7 +585,7 @@ int getWindowSize(int *rows, int *cols)
     return 0;
 }
 
-char *askPrompt(char *prompt)
+char *askPrompt(char *prompt, void (*callback)(char *, int))
 {
     size_t bufsize = 128;
     char *buf = malloc(bufsize);
@@ -513,6 +607,8 @@ char *askPrompt(char *prompt)
         else if (c == '\x1b')
         {
             setStatusMessage("");
+            if (callback)
+                callback(buf, c);
             free(buf);
             return NULL;
         }
@@ -521,6 +617,8 @@ char *askPrompt(char *prompt)
             if (buflen > 0)
             {
                 setStatusMessage("");
+                if (callback)
+                    callback(buf, c);
                 return buf;
             }
         }
@@ -534,6 +632,9 @@ char *askPrompt(char *prompt)
             buf[buflen++] = c;
             buf[buflen] = '\0';
         }
+
+        if (callback)
+            callback(buf, c);
     }
 }
 
@@ -622,6 +723,10 @@ void processKeypress(void)
         {
             E.cx = E.row[E.cy].size;
         }
+        break;
+
+    case CTRL_KEY('f'): // Find on Ctrl-F
+        find();
         break;
 
     case BACKSPACE:
