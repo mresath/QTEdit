@@ -11,9 +11,9 @@
 #define QUIT_PROT 3              // Number of times to press Ctrl-X to quit when dirty
 
 #define VERSION "1.0.0"
-#define GUIDE_TEXT "Ctrl-S: Save | Ctrl-X: Quit | Ctrl-F: Find | Ctrl-G: Goto Line | Ctrl-H: Help" // Status message for help
-#define QUIT_TEXT "WARNING: File has unsaved changes. Press Ctrl-X %d more time%s to quit."        // Status message for quit without saving warning
-#define FIND_TEXT "Search: %s (Use ESC/Arrows/Enter)"                                              // Status message for search
+#define GUIDE_TEXT "Ctrl-S: Save | Ctrl-X: Quit | Ctrl-F: Find | Ctrl-G: Goto Line | Ctrl-K: Delete Line | Ctrl-H: Help" // Status message for help
+#define QUIT_TEXT "WARNING: File has unsaved changes. Press Ctrl-X %d more time%s to quit."                              // Status message for quit without saving warning
+#define FIND_TEXT "Search: %s (Use ESC/Arrows/Enter)"                                                                    // Status message for search
 
 enum keycodes // Codes for break characters
 {

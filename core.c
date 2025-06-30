@@ -213,21 +213,31 @@ void insertNewline(void)
     // Enter press basically
     int offset = log10(E.numrows) + 2; // Offset for line numbers
 
+    erow *row = &E.row[E.cy];
+    char *indent = malloc(32);
+    int i = 0;
+    while (row->chars[i] == ' ' || row->chars[i] == '\t')
+    {
+        indent[i] = row->chars[i];
+        i++;
+    }
+
     if (E.cx == offset)
     {
         insertRow(E.cy, "", 0);
     }
     else
     {
-        erow *row = &E.row[E.cy];
-        insertRow(E.cy + 1, &row->chars[E.cx - offset], row->size - E.cx + offset);
+        realloc(indent, row->size - E.cx + offset + i);
+        memcpy(indent + i, &row->chars[E.cx - offset], row->size - E.cx + offset);
+        insertRow(E.cy + 1, indent, row->size - E.cx + offset + i);
         row = &E.row[E.cy];
         row->size = E.cx - offset;
         row->chars[row->size] = '\0';
         renderRow(row);
     }
     E.cy++;
-    E.cx = offset;
+    E.cx = offset + i;
 }
 
 void deleteChar(void)
@@ -251,6 +261,10 @@ void deleteChar(void)
         deleteRow(E.cy);
         E.cy--;
     }
+}
+
+void delCurRow(void) {
+    deleteRow(E.cy);
 }
 
 /* I/O */
@@ -795,6 +809,10 @@ void processKeypress(void)
 
     case CTRL_KEY('h'): // Help on Ctrl-H
         setStatusMessage(GUIDE_TEXT);
+        break;
+
+    case CTRL_KEY('k'):
+        delCurRow();
         break;
 
     case HOME_KEY: // Return to start of line on HOME
