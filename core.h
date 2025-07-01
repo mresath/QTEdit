@@ -11,9 +11,9 @@
 #define QUIT_PROT 3              // Number of times to press Ctrl-X to quit when dirty
 
 #define VERSION "1.0.0"
-#define GUIDE_TEXT "Ctrl-S: Save | Ctrl-X: Quit | Ctrl-F: Find | Ctrl-G: Goto Line | Ctrl-K: Delete Line | Ctrl-H: Help" // Status message for help
-#define QUIT_TEXT "WARNING: File has unsaved changes. Press Ctrl-X %d more time%s to quit."                              // Status message for quit without saving warning
-#define FIND_TEXT "Search: %s (Use ESC/Arrows/Enter)"                                                                    // Status message for search
+#define GUIDE_TEXT "Ctrl-S: Save | Ctrl-X: Quit | Ctrl-F: Find | Ctrl-G: Goto | Ctrl-K: Delete | Ctrl-C/V: Copy/Paste | Ctrl-H: Help" // Status message for help
+#define QUIT_TEXT "WARNING: File has unsaved changes. Press Ctrl-X %d more time%s to quit."                                                             // Status message for quit without saving warning
+#define FIND_TEXT "Search: %s (Use ESC/Arrows/Enter)"                                                                                                   // Status message for search
 
 enum keycodes // Codes for break characters
 {
@@ -22,6 +22,10 @@ enum keycodes // Codes for break characters
     ARROW_RIGHT,
     ARROW_UP,
     ARROW_DOWN,
+    SHIFT_ARROW_LEFT,
+    SHIFT_ARROW_RIGHT,
+    SHIFT_ARROW_UP,
+    SHIFT_ARROW_DOWN,
     HOME_KEY,
     END_KEY,
     PAGE_UP,
@@ -41,7 +45,8 @@ enum highlight // Highlight types
     HL_NUMBER,
     HL_FUNC,
     HL_VAR,
-    HL_MATCH
+    HL_MATCH,
+    HL_SELECTION
 };
 
 // Highlight flags
@@ -82,10 +87,15 @@ struct editorConfig
     erow *row;                   // Text in memory
     int dirty;                   // If the file has been modified
     char *filename;              // Name of open file
-    char status[80];             // Msg show at the bottom
+    char status[200];            // Msg show at the bottom
     time_t statustime;           // Timestamp of status
     struct editorSyntax *syntax; // Syntax for open editor
     struct termios orig_termios; // Original terminal
+
+    // Selection state
+    int sel_active;                 // Whether selection is active
+    int sel_start_cx, sel_start_cy; // Selection start position
+    int sel_end_cx, sel_end_cy;     // Selection end position
 };
 
 struct abuf

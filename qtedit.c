@@ -29,6 +29,11 @@ void init(void)
     E.status[0] = '\0';
     E.statustime = 0;
     E.syntax = NULL;
+    E.sel_active = 0;
+    E.sel_start_cx = 0;
+    E.sel_start_cy = 0;
+    E.sel_end_cx = 0;
+    E.sel_end_cy = 0;
 
     if (getWindowSize(&E.screenrows, &E.screencols) == -1)
         die("getWindowSize");

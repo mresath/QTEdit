@@ -42,6 +42,20 @@ void scroll(void);
 
 int getWindowSize(int *rows, int *cols);
 
+void clearSelection(void);
+
+void startSelection(void);
+
+void updateSelection(void);
+
+int isPositionSelected(int row, int col);
+
+void deleteSelection(void);
+
+void copySelection(void);
+
+void pasteFromClipboard(void);
+
 /* ROW OPS */
 
 void renderRow(erow *row)
@@ -263,8 +277,13 @@ void deleteChar(void)
     }
 }
 
-void delCurRow(void) {
+void delCurRow(void)
+{
     deleteRow(E.cy);
+}
+
+void paste(void)
+{
 }
 
 /* I/O */
@@ -541,10 +560,11 @@ int readKey(void)
 
         if (seq[0] == '[') // Starts with '['
         {
-            if (seq[1] >= '0' && seq[1] <= '9') // Possibly 3 long sequences
+            if (seq[1] >= '0' && seq[1] <= '9') // Possibly 3+ long sequences
             {
                 if (read(STDIN_FILENO, &seq[2], 1) != 1)
                     return '\x1b';
+
                 if (seq[2] == '~') // Ends with '~'
                 {
                     switch (seq[1])
@@ -563,6 +583,49 @@ int readKey(void)
                         return HOME_KEY;
                     case '8':
                         return END_KEY;
+                    }
+                }
+                else if (seq[1] == '1' && seq[2] == ';') // Extended sequences like ESC[1;2A
+                {
+                    char modifier;
+                    char direction;
+                    if (read(STDIN_FILENO, &modifier, 1) != 1)
+                        return '\x1b';
+                    if (read(STDIN_FILENO, &direction, 1) != 1)
+                        return '\x1b';
+
+                    // Check for Shift modifier (2) and handle direction
+                    if (modifier == '2') // Shift modifier
+                    {
+                        switch (direction)
+                        {
+                        case 'A':
+                            return SHIFT_ARROW_UP;
+                        case 'B':
+                            return SHIFT_ARROW_DOWN;
+                        case 'C':
+                            return SHIFT_ARROW_RIGHT;
+                        case 'D':
+                            return SHIFT_ARROW_LEFT;
+                        default:
+                            return '\x1b';
+                        }
+                    }
+                    else // Other modifiers - just handle as normal arrows
+                    {
+                        switch (direction)
+                        {
+                        case 'A':
+                            return ARROW_UP;
+                        case 'B':
+                            return ARROW_DOWN;
+                        case 'C':
+                            return ARROW_RIGHT;
+                        case 'D':
+                            return ARROW_LEFT;
+                        default:
+                            return '\x1b';
+                        }
                     }
                 }
             }
@@ -772,6 +835,38 @@ void moveCursor(int key)
         E.cx = offset;
 }
 
+void moveCursorWithSelection(int key)
+{
+    // Handle cursor movement with selection
+    if (!E.sel_active)
+    {
+        startSelection();
+    }
+
+    // Convert shift+arrow keys to regular arrow keys for movement
+    int movement_key;
+    switch (key)
+    {
+    case SHIFT_ARROW_LEFT:
+        movement_key = ARROW_LEFT;
+        break;
+    case SHIFT_ARROW_RIGHT:
+        movement_key = ARROW_RIGHT;
+        break;
+    case SHIFT_ARROW_UP:
+        movement_key = ARROW_UP;
+        break;
+    case SHIFT_ARROW_DOWN:
+        movement_key = ARROW_DOWN;
+        break;
+    default:
+        return; // Should not happen
+    }
+
+    moveCursor(movement_key);
+    updateSelection();
+}
+
 void processKeypress(void)
 {
     static int quit_count = QUIT_PROT; // Counter for quitting when dirty
@@ -786,6 +881,10 @@ void processKeypress(void)
         return;
 
     case '\r':
+        if (E.sel_active)
+        {
+            deleteSelection();
+        }
         insertNewline();
         break;
 
@@ -815,6 +914,14 @@ void processKeypress(void)
         delCurRow();
         break;
 
+    case CTRL_KEY('c'): // Copy on Ctrl-C
+        copySelection();
+        break;
+
+    case CTRL_KEY('v'): // Paste on Ctrl-V
+        pasteFromClipboard();
+        break;
+
     case HOME_KEY: // Return to start of line on HOME
         E.cx = offset;
         break;
@@ -831,9 +938,16 @@ void processKeypress(void)
 
     case BACKSPACE:
     case DELETE_KEY:
-        if (c == DELETE_KEY)
-            moveCursor(ARROW_RIGHT); // Move right if DELETE is pressed
-        deleteChar();
+        if (E.sel_active)
+        {
+            deleteSelection();
+        }
+        else
+        {
+            if (c == DELETE_KEY)
+                moveCursor(ARROW_RIGHT); // Move right if DELETE is pressed
+            deleteChar();
+        }
         break;
 
     case PAGE_UP: // Go to top/bottom of file on PAGE_UP/PAGE_DOWN
@@ -856,11 +970,19 @@ void processKeypress(void)
     }
     break;
 
-    case ARROW_LEFT:  // Move left
-    case ARROW_RIGHT: // Move right
-    case ARROW_DOWN:  // Move down
-    case ARROW_UP:    // Move up
+    case ARROW_LEFT:      // Move left
+    case ARROW_RIGHT:     // Move right
+    case ARROW_DOWN:      // Move down
+    case ARROW_UP:        // Move up
+        clearSelection(); // Clear selection on normal movement
         moveCursor(c);
+        break;
+
+    case SHIFT_ARROW_LEFT:  // Move left with selection
+    case SHIFT_ARROW_RIGHT: // Move right with selection
+    case SHIFT_ARROW_DOWN:  // Move down with selection
+    case SHIFT_ARROW_UP:    // Move up with selection
+        moveCursorWithSelection(c);
         break;
 
     case CTRL_KEY('l'):
@@ -868,6 +990,14 @@ void processKeypress(void)
         break;
 
     default:
+        if (iscntrl(c) || c >= 127)
+        {
+            break;
+        }
+        if (E.sel_active)
+        {
+            deleteSelection();
+        }
         insertChar(c); // Insert character
         break;
     }
@@ -976,29 +1106,48 @@ void drawRows(struct abuf *ab)
                         abAppend(ab, buf, clen);
                     }
                 }
-                else if (hl[j] == HL_NORMAL)
-                { // If normal text, reset color
-                    if (cc != -1)
-                    {
-                        abAppend(ab, "\x1b[39m", 5);
-                        cc = -1;
-                    }
-                    abAppend(ab, &c[j], 1);
-                }
                 else
-                { // If syntax highlighted text, set color
-                    int color = syntaxToColor(hl[j]);
+                {
+                    // Check if this position is selected
+                    int selected = isPositionSelected(filerow, E.coloff + j);
+                    int color;
+
+                    if (selected)
+                    {
+                        color = syntaxToColor(HL_SELECTION);
+                    }
+                    else if (hl[j] == HL_NORMAL)
+                    {
+                        color = -1; // No color for normal text
+                    }
+                    else
+                    {
+                        color = syntaxToColor(hl[j]);
+                    }
+
                     if (color != cc)
-                    { // If current color needs to change, append new escape sequence
+                    {
+                        if (cc != -1)
+                        {
+                            abAppend(ab, "\x1b[39m", 5); // Reset foreground
+                            if (cc == syntaxToColor(HL_SELECTION))
+                            {
+                                abAppend(ab, "\x1b[49m", 5); // Reset background
+                            }
+                        }
                         cc = color;
-                        char buf[16];
-                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
-                        abAppend(ab, buf, clen);
+                        if (color != -1)
+                        {
+                            char buf[16];
+                            int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+                            abAppend(ab, buf, clen);
+                        }
                     }
                     abAppend(ab, &c[j], 1);
                 }
             }
-            abAppend(ab, "\x1b[39m", 5); // Reset color in the end
+            abAppend(ab, "\x1b[39m", 5); // Reset foreground color
+            abAppend(ab, "\x1b[49m", 5); // Reset background color
         }
 
         abAppend(ab, "\x1b[K", 3); // End the line
@@ -1414,6 +1563,8 @@ int syntaxToColor(int hl)
         return 96;
     case HL_MATCH:
         return 93;
+    case HL_SELECTION:
+        return 47; // White background for selection
     default:
         return 37;
     }
@@ -1452,5 +1603,272 @@ void selectSyntax(void)
             }
             i++;
         }
+    }
+}
+
+/* SELECTION */
+
+void clearSelection(void)
+{
+    // Clear current selection
+    E.sel_active = 0;
+    E.sel_start_cx = E.sel_start_cy = 0;
+    E.sel_end_cx = E.sel_end_cy = 0;
+}
+
+void startSelection(void)
+{
+    // Start a new selection at current cursor position
+    int offset = log10(E.numrows) + 2;
+    E.sel_active = 1;
+    E.sel_start_cx = E.cx - offset;
+    E.sel_start_cy = E.cy;
+    E.sel_end_cx = E.cx - offset;
+    E.sel_end_cy = E.cy;
+}
+
+void updateSelection(void)
+{
+    // Update selection end to current cursor position
+    if (E.sel_active)
+    {
+        int offset = log10(E.numrows) + 2;
+        E.sel_end_cx = E.cx - offset;
+        E.sel_end_cy = E.cy;
+    }
+}
+
+int isPositionSelected(int row, int col)
+{
+    // Check if a position is within the current selection
+    if (!E.sel_active)
+        return 0;
+
+    int start_row = E.sel_start_cy;
+    int start_col = E.sel_start_cx;
+    int end_row = E.sel_end_cy;
+    int end_col = E.sel_end_cx;
+
+    // Normalize selection so start is always before end
+    if (start_row > end_row || (start_row == end_row && start_col > end_col))
+    {
+        int temp_row = start_row;
+        int temp_col = start_col;
+        start_row = end_row;
+        start_col = end_col;
+        end_row = temp_row;
+        end_col = temp_col;
+    }
+
+    // Check if position is within selection bounds
+    if (row < start_row || row > end_row)
+        return 0;
+    if (row == start_row && col < start_col)
+        return 0;
+    if (row == end_row && col >= end_col)
+        return 0;
+
+    return 1;
+}
+
+void deleteSelection(void)
+{
+    // Delete all text within the current selection
+    if (!E.sel_active)
+        return;
+
+    int start_row = E.sel_start_cy;
+    int start_col = E.sel_start_cx;
+    int end_row = E.sel_end_cy;
+    int end_col = E.sel_end_cx;
+
+    // Normalize selection so start is always before end
+    if (start_row > end_row || (start_row == end_row && start_col > end_col))
+    {
+        int temp_row = start_row;
+        int temp_col = start_col;
+        start_row = end_row;
+        start_col = end_col;
+        end_row = temp_row;
+        end_col = temp_col;
+    }
+
+    // Position cursor at selection start
+    int offset = log10(E.numrows) + 2;
+    E.cy = start_row;
+    E.cx = start_col + offset;
+
+    if (start_row == end_row)
+    {
+        // Selection is within a single row
+        erow *row = &E.row[start_row];
+        memmove(&row->chars[start_col], &row->chars[end_col],
+                row->size - end_col + 1);
+        row->size -= (end_col - start_col);
+        renderRow(row);
+        E.dirty++;
+    }
+    else
+    {
+        // Selection spans multiple rows
+
+        // First, modify the start row to remove everything from start_col to end
+        erow *start_row_ptr = &E.row[start_row];
+        start_row_ptr->size = start_col;
+        start_row_ptr->chars[start_col] = '\0';
+
+        // If end row exists, append the remainder of end row to start row
+        if (end_row < E.numrows)
+        {
+            erow *end_row_ptr = &E.row[end_row];
+            char *remaining = &end_row_ptr->chars[end_col];
+            int remaining_len = end_row_ptr->size - end_col;
+
+            start_row_ptr->chars = realloc(start_row_ptr->chars,
+                                           start_row_ptr->size + remaining_len + 1);
+            memcpy(&start_row_ptr->chars[start_row_ptr->size], remaining, remaining_len);
+            start_row_ptr->size += remaining_len;
+            start_row_ptr->chars[start_row_ptr->size] = '\0';
+        }
+
+        renderRow(start_row_ptr);
+
+        // Delete all rows between start_row+1 and end_row (inclusive)
+        for (int i = end_row; i > start_row; i--)
+        {
+            deleteRow(i);
+        }
+
+        E.dirty++;
+    }
+
+    clearSelection();
+}
+
+void copySelection(void)
+{
+    // Copy selected text to clipboard using pbcopy
+    if (!E.sel_active)
+        return;
+
+    int start_row = E.sel_start_cy;
+    int start_col = E.sel_start_cx;
+    int end_row = E.sel_end_cy;
+    int end_col = E.sel_end_cx;
+
+    // Normalize selection so start is always before end
+    if (start_row > end_row || (start_row == end_row && start_col > end_col))
+    {
+        int temp_row = start_row;
+        int temp_col = start_col;
+        start_row = end_row;
+        start_col = end_col;
+        end_row = temp_row;
+        end_col = temp_col;
+    }
+
+    // Create a pipe to pbcopy
+    FILE *pbcopy = popen("pbcopy", "w");
+    if (!pbcopy)
+    {
+        setStatusMessage("Error: Could not access clipboard");
+        return;
+    }
+
+    if (start_row == end_row)
+    {
+        // Selection is within a single row
+        erow *row = &E.row[start_row];
+        for (int i = start_col; i < end_col && i < row->size; i++)
+        {
+            fputc(row->chars[i], pbcopy);
+        }
+    }
+    else
+    {
+        // Selection spans multiple rows
+
+        // First row: from start_col to end of line
+        erow *row = &E.row[start_row];
+        for (int i = start_col; i < row->size; i++)
+        {
+            fputc(row->chars[i], pbcopy);
+        }
+        fputc('\n', pbcopy);
+
+        // Middle rows: entire rows
+        for (int r = start_row + 1; r < end_row; r++)
+        {
+            row = &E.row[r];
+            for (int i = 0; i < row->size; i++)
+            {
+                fputc(row->chars[i], pbcopy);
+            }
+            fputc('\n', pbcopy);
+        }
+
+        // Last row: from beginning to end_col
+        if (end_row < E.numrows)
+        {
+            row = &E.row[end_row];
+            for (int i = 0; i < end_col && i < row->size; i++)
+            {
+                fputc(row->chars[i], pbcopy);
+            }
+        }
+    }
+
+    pclose(pbcopy);
+    setStatusMessage("Text copied to clipboard");
+}
+
+void pasteFromClipboard(void)
+{
+    // Delete selected text if any
+    if (E.sel_active)
+    {
+        deleteSelection();
+    }
+
+    // Get text from clipboard using pbpaste
+    FILE *pbpaste = popen("pbpaste", "r");
+    if (!pbpaste)
+    {
+        setStatusMessage("Error: Could not access clipboard");
+        return;
+    }
+
+    // Read clipboard content directly and insert character by character
+    int c;
+    int char_count = 0;
+    while ((c = fgetc(pbpaste)) != EOF)
+    {
+        if (c == '\n')
+        {
+            insertNewline();
+        }
+        else if (c != '\r') // Skip carriage returns
+        {
+            insertChar(c);
+        }
+        char_count++;
+
+        // Prevent extremely long pastes from freezing the editor
+        if (char_count > 100000)
+        {
+            setStatusMessage("Paste truncated - too large");
+            break;
+        }
+    }
+
+    pclose(pbpaste);
+
+    if (char_count == 0)
+    {
+        setStatusMessage("Clipboard is empty");
+    }
+    else
+    {
+        setStatusMessage("Text pasted from clipboard");
     }
 }
