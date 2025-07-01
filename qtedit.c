@@ -46,12 +46,37 @@ void init(void)
 
 int main(int argc, char *argv[])
 {
-    enableRawMode();
-    init();
-
     if (argc >= 2)
     {
-        eopen(argv[1]);
+        for (int i = 1; i < argc; i++)
+        {
+            char *arg = argv[i];
+            if (arg[0] == '-')
+            {
+                if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0)
+                {
+                    fprintf(stderr, "Usage: %s [options] <filename>\n", argv[0]);
+                    fprintf(stderr, "Options:\n");
+                    fprintf(stderr, "  -h, --help       Show this help message\n");
+                    exit(0);
+                }
+                else
+                {
+                    fprintf(stderr, "Unknown option: %s\n", arg);
+                    fprintf(stderr, "Use -h or --help for usage information.\n");
+                    exit(1);
+                }
+            }
+        }
+        init();
+        enableRawMode();
+
+        eopen(argv[argc - 1]);
+    }
+    else
+    {
+        init();
+        enableRawMode();
     }
 
     setStatusMessage(GUIDE_TEXT);
