@@ -2,6 +2,8 @@
 
 Terminal text editor written in C.
 
+Currently only compiled and tested in macOS.
+
 ## Features
 
 - Anything a basic text editor should do
