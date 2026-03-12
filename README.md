@@ -33,3 +33,7 @@ Usage: ./qtedit [options] <filename>
 Options:
   -h, --help       Show this help message
 ```
+
+## Copyright
+
+Distributed under the GNU GPLv3 License. See `LICENSE` for more information.
